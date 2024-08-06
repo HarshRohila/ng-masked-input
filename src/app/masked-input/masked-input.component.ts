@@ -1,5 +1,7 @@
 import { Component, ElementRef, ViewChild } from '@angular/core';
 
+const DEFAULT_ACCEPTED_INPUT = '\\d';
+
 @Component({
   selector: 'app-masked-input',
   templateUrl: './masked-input.component.html',
@@ -13,31 +15,59 @@ export class MaskedInputComponent {
 
     const pattern = el.getAttribute('placeholder') || '',
       slots = new Set(el.dataset['slots'] || '_'),
-      prev = ((j) =>
-        Array.from(pattern, (c, i) => (slots.has(c) ? (j = i + 1) : j)))(0),
-      first = [...pattern].findIndex((c) => slots.has(c)),
-      accept = new RegExp(el.dataset['accept'] || '\\d', 'g'),
-      clean = (input: string) => {
-        const matches = input.match(accept) || [];
-        return Array.from(pattern, (c) =>
-          matches[0] === c || slots.has(c) ? matches.shift() || c : c
+      isSlotChar = (char: string) => slots.has(char),
+      prev = ((cursorIdx) => {
+        return Array.from(pattern, (char, i) =>
+          isSlotChar(char) ? (cursorIdx = i + 1) : cursorIdx
         );
+      })(0),
+      first = [...pattern].findIndex((c) => slots.has(c)),
+      acceptedCharRegex = new RegExp(
+        el.dataset['accept'] || DEFAULT_ACCEPTED_INPUT,
+        'g'
+      ),
+      getCleanedInputChars = (input: string) => {
+        const matchedInputChars = input.match(acceptedCharRegex) || [];
+
+        return Array.from(pattern, function mapChar(patternChar) {
+          return matchedInputChars[0] === patternChar || isSlotChar(patternChar)
+            ? matchedInputChars.shift() || patternChar
+            : patternChar;
+        });
       },
       format = () => {
-        const [i, j] = [el.selectionStart, el.selectionEnd].map((i) => {
-          i = clean(el.value.slice(0, i || undefined)).findIndex((c) =>
-            slots.has(c)
-          );
-          return i < 0 ? prev.at(-1) : back ? prev[i - 1] || first : i;
+        const [i, j] = [el.selectionStart, el.selectionEnd].map((cursorPos) => {
+          cursorPos = getCleanedInputChars(
+            el.value.slice(0, cursorPos || undefined)
+          ).findIndex((c) => isSlotChar(c));
+
+          const isNonSlotChar = cursorPos < 0;
+
+          return isNonSlotChar
+            ? prev.at(-1)
+            : isBackspace
+            ? prev[cursorPos - 1] || first
+            : cursorPos;
         });
-        el.value = clean(el.value).join('');
+        el.value = getCleanedInputChars(el.value).join('');
         el.setSelectionRange(i || null, j || null);
-        back = false;
+        isBackspace = false;
       };
-    let back = false;
-    el.addEventListener('keydown', (e) => (back = e.key === 'Backspace'));
+
+    let isBackspace = false;
+
+    const setIsBackspace = (e: { key: string }) =>
+      (isBackspace = e.key === 'Backspace');
+
+    el.addEventListener('keydown', setIsBackspace);
+
     el.addEventListener('input', format);
     el.addEventListener('focus', format);
-    el.addEventListener('blur', () => el.value === pattern && (el.value = ''));
+
+    el.addEventListener('blur', function onBlur() {
+      if (el.value === pattern) {
+        el.value = '';
+      }
+    });
   }
 }
